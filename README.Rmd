@@ -1,0 +1,47 @@
+---
+output: github_document
+bibliography: "extraclassical.bib"
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r setup, include = FALSE, message = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+library(extraclassical)
+library(tidyverse)
+```
+# extraclassical
+
+The R package 'extraclassical' allows for an analysis of extraclassical effects in images and is still under development. It may be installed using 'devtools':
+
+```{r eval = FALSE}
+# install.packages("devtools")
+devtools::install_github("sflippl/extraclassical")
+```
+
+It provides an interface to the CIFAR-10 dataset [@Krizhevsky2009] using the function 'read_cifar' and has the first batch of the dataset directly available for analysis:
+
+```{r echo = TRUE}
+cifar_10_1
+```
+
+The column label contains the object category, which is irrelevant for the present purposes. The columns red, green, and blue contain the red, green, and blue channels of the image as a 32x32-matrix. The column bw contains a 32x32-matrix consisting of the values averaged over the red, green, and blue channels. The function 'matrix_picture' displays the black-and-white picture represented by such a matrix:
+
+```{r echo = TRUE}
+matrix_picture(cifar_10_1$bw[[2]])
+```
+
+The function 'contrast_filter' applies a contrast filter of a certain orientation (given by the corresponding compass point) and the function 'estimate_contrast_covariance' allows for the subsequent covariance estimation along this orientation (given by a choice of 'horizontal', 'vertical', 'diagonal', or 'antidiagonal'). For example, the following code yields the covariance along the horizontal contrast of the picture above:
+
+```{r}
+cifar_10_1$bw[[2]] %>% 
+    contrast_filter(orientation = "n") %>% 
+    estimate_contrast_covariance(orientation = "horizontal")
+```
+
+## References {-}

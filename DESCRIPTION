@@ -1,0 +1,28 @@
+Type: Package
+Package: extraclassical
+Title: Models And Explains Extraclassical Field Effects
+Date: 2019-04-07
+Version: 0.0.0.9000
+Authors@R: as.person(c(
+    "Samuel Lippl <sfc.lippl@gmail.com> [aut, cre]"))
+Description: Extraclassical field effects are used to understand the paradigm
+    under which the brain extracts information. Necessary and sufficient 
+    conditions for these extraclassical effects (both with respect to natural 
+    data and the rules of inference) are therefore an important step towards a 
+    better understanding of the brain. This package both explains mathematical
+    models of these effects and assists in their development.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 6.1.0
+Imports: 
+    checkmate,
+    rlang,
+    purrr,
+    dplyr,
+    tibble,
+    tidyr,
+    ggplot2,
+    reticulate,
+    pracma,
+    magrittr

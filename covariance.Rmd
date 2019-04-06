@@ -1,0 +1,335 @@
+---
+title: "Endstopping"
+author: "Samuel Lippl"
+date: "30 March 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(extraclassical)
+library(tidyverse)
+library(purrr)
+library(rlang)
+library(broom)
+```
+
+## Natural Statistics
+
+```{r cache = TRUE}
+cifar <- read_cifar_10("1")
+# covariance_cifar <-
+#     tibble(
+#         orientation =
+#             c("horizontal", "vertical", "diagonal", "antidiagonal") %>%
+#             rep(5),
+#         orientation_contrast =
+#             c("n", "w", "ne", "nw") %>%
+#             rep(5),
+#         thickness = rep(1:5, each = 4)
+#     ) %>%
+#     mutate(
+#         covariance =
+#             purrr::map2(
+#                 orientation_contrast, thickness,
+#                 function(it_orientation, it_thickness) {
+#                     cifar$bw %>%
+#                         map(contrast_filter,
+#                             orientation = it_orientation,
+#                             thickness = it_thickness) %>%
+#                         estimate_contrast_covariance(
+#                             contrast_orientation = it_orientation
+#                         )
+#                 }
+#             )
+#     )
+
+load("covariance_cifar.RData")
+```
+
+```{r}
+tbl_covariance <- 
+    covariance_cifar %>% 
+    mutate(correlation = map(covariance, ~ ./.[1])) %>% 
+    mutate(distance = map(thickness, ~ (0:(31-2*.)))) %>%
+    unnest() %>% 
+    mutate(distance = if_else(orientation %in% c("horizontal", "vertical"),
+                              as_double(distance),
+                              sqrt(2)*distance))
+tbl_covariance %>% 
+    ggplot(aes(distance, correlation, colour = orientation, alpha = thickness, group = interaction(thickness, orientation))) + 
+    geom_line() + 
+    scale_alpha_continuous(trans = "reverse") + 
+    # facet_wrap(~thickness) + 
+    # stat_smooth(method = "nls", formula = y ~ exp(a*x), linetype = 2, method.args = list(start = list(a = -1))) + 
+    NULL
+```
+
+Higher correlation for higher thickness is necessarily the case, but it is good to see that there are no decisive differences. We choose a thickness of 2 from now on.
+
+```{r}
+tbl_covariance %>% 
+    filter(thickness == 2) %>% 
+    ggplot(aes(distance, correlation, colour = orientation)) + 
+    geom_line()
+```
+
+At first, we attempt to describe this relationship more compactly. We must make a difference between diagonal, horizontal, and vertical bars on the one hand, which are all consistent with the assumption that we indeed have a bar length variable and antidiagonal structures that seem to be exclusively very short and not adhere to the same translational invariance.
+
+We first fit a simple exponential model:
+
+```{r}
+tmp_exp_model <- 
+    tbl_covariance %>% 
+    filter(thickness == 2L) %>%
+    group_by(orientation) %>%
+    nest() %>% 
+    mutate(
+        model = map(data, 
+                    ~ nls(formula = correlation ~ exp(-a*(distance+.01)^b), 
+                          data = ., 
+                          start = list(a = 1, b = 1)) %>% 
+                        augment() %>% 
+                        select(.fitted)
+        ),
+        statistics = map(
+            data, 
+            ~ nls(formula = correlation ~ exp(-a*(distance+.01)^b), 
+                          data = ., 
+                          start = list(a = 1, b = 1)) %>% 
+                        tidy()
+        )
+    )
+exp_model <- 
+    tmp_exp_model %>% 
+    unnest(data, model)
+exp_model_stats <- 
+    tmp_exp_model %>% 
+    unnest(statistics)
+exp_model %>% 
+    ggplot() + 
+    geom_line(aes(distance, correlation, colour = orientation)) + 
+    geom_line(aes(distance, 
+                  .fitted, 
+                  colour = orientation), linetype = 2)
+```
+
+```{r}
+tmp_power_model <- 
+    tbl_covariance %>% 
+    filter(thickness == 2L) %>%
+    group_by(orientation) %>%
+    nest() %>% 
+    mutate(
+        model = map(data, 
+                    ~ nls(formula = correlation ~ b*(distance+.01)^(-a), 
+                          data = ., 
+                          start = list(a = 1, b = 1)) %>% 
+                        augment() %>% 
+                        select(.fitted)
+        ),
+        statistics = map(
+            data, 
+            ~ nls(formula = correlation ~ b*(distance+.01)^(-a), 
+                          data = ., 
+                          start = list(a = 1, b = 1)) %>% 
+                        tidy()
+        )
+    )
+power_model <- 
+    tmp_power_model %>% 
+    unnest(data, model)
+power_model_stats <- 
+    tmp_power_model %>% 
+    unnest(statistics)
+power_model %>% 
+    ggplot() + 
+    geom_line(aes(distance, correlation, colour = orientation)) + 
+    geom_line(aes(distance, 
+                  .fitted, 
+                  colour = orientation), linetype = 2)
+```
+
+This demonstrates that an exponential model fits better than a power law which has more conceptual reasons, as well. (I will elaborate on those in the thesis itself.)
+
+## Endstopping
+
+```{r}
+tbl_fourier <- 
+    tbl_covariance %>% 
+    filter(thickness == 2L) %>% 
+    group_by(orientation) %>% 
+    summarise(
+        value = list(
+            map_dbl(
+                0:floor(n()/2-1), 
+                ~ sum(correlation * cospi(2*.*(0:(n()-1))/n()))
+            )
+        ), 
+        frequency = list(0:floor(n()/2-1))
+    ) %>% 
+    unnest()
+tbl_fourier %>% 
+    ggplot(aes(frequency, value, colour = orientation)) + 
+    geom_line()
+```
+
+This is consistent with the observation of an exponential law, which would imply -- regardless of $a$ -- that the lower frequency always explain more variance. This means that we can now model an error neuron given an input of length $0\le l\le 30$ for $2k+1$ dimensions, $0\le k\le\frac{n-1}{2}$.
+
+```{r}
+n <- 30
+tbl_endstopping <- 
+    expand.grid(l = 0:n, k=0:((n-1)/2)) %>% 
+    as_tibble() %>% 
+    mutate(
+        prediction_error = 
+            map2_dbl(
+                l, k, 
+                function(.l, .k) {
+                    (.l>=1) - (
+                        .l/n + 
+                        2/n * 
+                        sum(
+                            purrr::map_dbl(
+                                seq_len(.k),
+                                ~ sum(cospi(2*./n*(seq_len(.l)-1)))
+                            )
+                        )
+                    )
+                }
+            )
+    )
+tbl_endstopping %>% 
+    ggplot(aes(l, prediction_error)) + 
+    geom_line() + 
+    facet_wrap(~k)
+```
+
+What happens if we increase maximal n?
+
+```{r}
+n <- 60
+tbl_endstopping_2 <- 
+    expand.grid(l = 0:n, k=0:((n-1)/2)) %>% 
+    as_tibble() %>% 
+    mutate(
+        prediction_error = 
+            map2_dbl(
+                l, k, 
+                function(.l, .k) {
+                    (.l>=1) - (
+                        .l/n + 
+                        2/n * 
+                        sum(
+                            purrr::map_dbl(
+                                seq_len(.k),
+                                ~ sum(cospi(2*./n*(seq_len(.l)-1)))
+                            )
+                        )
+                    )
+                }
+            )
+    )
+tbl_endstopping_2 %>% 
+    ggplot(aes(l, prediction_error)) + 
+    geom_line() + 
+    facet_wrap(~k)
+```
+
+We now consider the maximal length of the bar to be $1$ and consider as one pixel of the bar a length $1/n$. We then still have $n$ pixels with the same range of values between $-1$ and $1$, where we take into account values between $0$ and $1$ in particular. How does the function develop in dependence of the number of components? As a sample, we pick:
+
+```{r}
+vec_n <- c(50, 100, 500)
+```
+
+```{r}
+tbl_endstopping_scale <- 
+    tibble(n = vec_n) %>% 
+    mutate(l = map(n, ~0:.), k = map(n, ~(0:((.-1)/2)))) %>% 
+    unnest(l, .drop = FALSE) %>% 
+    unnest() %>% 
+    mutate(
+        prediction_error = 
+            pmap_dbl(
+                list(l, k, n), 
+                function(.l, .k, .n) {
+                    (.l>=1) - (
+                        .l/.n + 
+                        2/.n * 
+                        sum(
+                            purrr::map_dbl(
+                                seq_len(.k),
+                                ~ sum(cospi(2*./.n*(seq_len(.l)-1)))
+                            )
+                        )
+                    )
+                }
+            )
+    )
+tbl_endstopping_scale %>% 
+    filter(k %in% c(1, 2, 3, 5, 10, 20, 40, 200)) %>% 
+    mutate(d = l/n) %>%
+    ggplot(aes(d, prediction_error, colour = factor(n))) + 
+    geom_line() + 
+    facet_wrap(~k)
+```
+
+```{r}
+tbl_endstopping_scale %>% 
+    filter(k == 200, n == 500) %>% 
+    ggplot(aes(l, prediction_error)) + 
+    geom_line()
+```
+
+```{r}
+tbl_endstopping_n <- 
+    expand.grid(
+        n = c(50, 100, 500, 1000, 5000, 10000, Inf), 
+        d = seq(0, 1, by = .01),
+        k = 0:5
+    ) %>% 
+    as_tibble() %>% 
+    mutate(
+        l = d*n,
+        prediction_error = 
+            pmap_dbl(
+                list(d, k, n), 
+                function(.d, .k, .n) {
+                    if(is.finite(.n)) {
+                       return(
+                           (.d*.n>=1) - (
+                               .d + 
+                               2/.n * 
+                               sum(
+                                   purrr::map_dbl(
+                                       seq_len(.k),
+                                       ~ sum(cospi(2*./.n*(seq_len(.d*.n)-1)))
+                                   )
+                               )
+                           )
+                       ) 
+                    }
+                    else {
+                        return(
+                            1 - (
+                                .d + 
+                                    sum(
+                                        purrr::map_dbl(
+                                            seq_len(.k),
+                                            ~ sum(1/(pi*.)*sinpi(2*.*.d))
+                                        )
+                                    )
+                            )
+                        )
+                    }
+                }
+            )
+    )
+tbl_endstopping_n %>% 
+    filter(n == Inf) %>% 
+    ggplot(aes(d, prediction_error, colour = factor(n))) + 
+    geom_line() + 
+    facet_wrap(~k)
+```
+
+This is the continuous approximation of the endstopping effect.
